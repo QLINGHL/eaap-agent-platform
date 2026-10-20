@@ -1,0 +1,77 @@
+== health ==
+{"status":"ok","service":"eaap"}
+== seed ==
+{
+  "tenant_id": "tenant_demo",
+  "api_key": "eaap-demo-key",
+  "kb_id": "kb_d6cd4ddd68be4bb7",
+  "contract-qa": "agt_a82dc7f7fa57435d",
+  "contract-qa_version": "ver_e85c6b63323641c3",
+  "report-generator": "agt_80af2f4f70744db9",
+  "report-generator_version": "ver_00dc5af7986f4d7a",
+  "eval_dataset_id": "ds_722fd3bd1edd4292"
+}
+contract-qa agent: agt_a82dc7f7fa57435d
+== run 1: KB-covered question (expect: completes, grounded, cited) ==
+run id: run_7c98a8b3cc6c4496
+status: completed
+output: Based on the retrieved sources: [MSA Payment Terms#0] Payment terms: all invoices are due within 30 days of the invoice date. Late payments accrue a fee of 1.5 
+tokens: 161 cost: 0.000237
+== run 2: off-topic question (expect: HITL pause -> approve -> completed) ==
+run id: run_d5d3e2c8783645fa
+status: waiting_approval
+approval id: appr_bdcc82f251b84249
+decision recorded: approved
+status after approval: completed
+output: I don't have verified source material for this question ('What is the weather in Tokyo today?'). A human shoul
+== trace of run 2 ==
+ node: start start completed 13ms
+ node: kb knowledge_retrieval completed 14ms
+ node: llm llm completed 97ms
+ node: check condition completed 17ms
+ node: human human_review completed 0ms
+ node: end end completed 14ms
+ events: ['run.started', 'node.started', 'node.completed', 'node.started', 'node.completed', 'node.started', 'node.completed', 'node.started', 'node.completed', 'approval.requested', 'node.completed', 'node.started', 'node.completed', 'run.completed']
+ checkpoints: 7
+== SSE replay of run 2 events ==
+id: 13
+event: run.started
+data: {"trace_id": "trace_d90b09ecefb447b9"}
+
+id: 14
+event: node.started
+data: {"node_id": "start", "node_type": "start"}
+
+id: 15
+event: node.completed
+data: {"node_id": "start", "latency_ms": 13, "tokens": 0}
+
+id: 16
+event: node.started
+data: {"node_id": "kb", "node_type": "knowledge_retrieval"}
+
+id: 17
+event: node.completed
+data: {"node_id": "kb", "latency_ms": 14, "tokens": 0}
+
+id: 18
+event: node.started
+data: {"node_id": "llm", "node_type": "llm"}
+
+id: 19
+event: node.completed
+data: {"node_id": "llm", "latency_ms": 97, "tokens": 68}
+
+id: 20
+event: node.started
+== eval run on seeded dataset ==
+eval status: completed | metrics: {'cases': 3, 'passed': 3, 'pass_rate': 1.0, 'avg_latency_ms': 482.0, 'total_tokens': 386}
+== usage ==
+{"tenant_id":"tenant_demo","totals":{"cost_usd":0.000919,"tokens":615.0},"runs":5}
+== trace viewer (HTML) ==
+<!doctype html><html><head><meta charset="utf-8">
+<title>EAAP trace run_d5d3e2c8783645fa</title></head><body>
+<h1>Run run_d5d3e2c8783645fa</h1>
+<p>Status: <b>completed</b> · tokens: 68
+· cost: $0.00
+== smoke done ==
