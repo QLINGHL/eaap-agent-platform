@@ -31,3 +31,13 @@ def rate_limit_refill_per_sec() -> float:
 
 def max_run_steps() -> int:
     return int(os.environ.get("EAAP_MAX_RUN_STEPS", "500"))
+
+
+def tool_breaker_threshold() -> int:
+    """Consecutive tool failures before the circuit breaker opens (FR-407)."""
+    return int(os.environ.get("EAAP_TOOL_BREAKER_THRESHOLD", "5"))
+
+
+def tool_breaker_cooldown_sec() -> float:
+    """Seconds a tool stays paused after the breaker opens (FR-407)."""
+    return float(os.environ.get("EAAP_TOOL_BREAKER_COOLDOWN_SEC", "60"))

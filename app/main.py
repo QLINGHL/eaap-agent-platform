@@ -299,7 +299,22 @@ def search_kb(kb_id: str, body: SearchBody,
 
 @app.get("/v1/tools")
 def get_tools(tenant: str = Depends(current_tenant)):
-    return {"tools": list_tools()}
+    from .tools import BREAKER
+    tools = list_tools()
+    for t in tools:
+        t["breaker"] = BREAKER.state(tenant, t["name"])
+    return {"tools": tools}
+
+
+@app.post("/v1/tools/{name}/reset")
+def reset_tool_breaker(name: str, tenant: str = Depends(current_tenant)):
+    """Reset the FR-407 circuit breaker for one tool (admin/debug surface)."""
+    from .tools import BREAKER, TOOLS
+    if name not in TOOLS:
+        raise HTTPException(404, detail={"code": "TOOL_NOT_FOUND",
+                                        "message": f"unknown tool '{name}'"})
+    BREAKER.reset(tenant, name)
+    return {"tool": name, "breaker": BREAKER.state(tenant, name)}
 
 
 @app.post("/v1/tools")

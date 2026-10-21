@@ -1,17 +1,28 @@
-"""Tool registry and execution (FR-401/404/406/407-lite).
+"""Tool registry and execution (FR-401/404/406/407).
 
 Tools are registered with a JSON-Schema for their arguments. Arguments are
 validated BEFORE execution; invalid arguments never reach the tool. Every
 call is written to the audit log with sensitive argument values redacted.
+
+FR-407: a per-tool circuit breaker pauses a tool after N consecutive
+failures (see ``EAAP_TOOL_BREAKER_THRESHOLD`` / ``EAAP_TOOL_BREAKER_COOLDOWN_SEC``).
+While paused, calls are rejected with ``CIRCUIT_OPEN`` and audited as
+``tool.rejected``. After the cooldown, one half-open trial is allowed: a
+success closes the circuit, a failure re-opens it.
 """
 import ast
+import threading
 import time
 
 import httpx
 
-from . import db
+from . import config, db
 from .guard import scan_value
 from .schemaval import validate
+
+
+# Injectable clock so tests can advance time without sleeping.
+_clock = time.monotonic
 
 
 class ToolError(Exception):
@@ -114,6 +125,80 @@ def _http_fetch(args: dict) -> dict:
             "body": resp.text[:8000]}
 
 
+# ---------------------------------------------------------- circuit breaker --
+
+class CircuitBreaker:
+    """Per-(tenant, tool) circuit breaker.
+
+    States per tool: ``closed`` (normal) -> ``open`` (paused, calls rejected)
+    -> ``half-open`` (single trial allowed after the cooldown expires).
+    A successful trial closes the circuit; a failed trial re-opens it.
+    A success in ``closed`` resets the consecutive-failure counter.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._states: dict[tuple[str, str], dict] = {}
+
+    def _entry(self, tenant_id: str, name: str) -> dict:
+        return self._states.setdefault(
+            (tenant_id, name),
+            {"state": "closed", "failures": 0, "opened_at": None})
+
+    def before_call(self, tenant_id: str, name: str) -> dict:
+        """Raise ToolError(code="CIRCUIT_OPEN") if the tool is paused."""
+        now = _clock()
+        with self._lock:
+            e = self._entry(tenant_id, name)
+            if e["state"] == "open":
+                if now - e["opened_at"] >= config.tool_breaker_cooldown_sec():
+                    e["state"] = "half-open"
+                    return {"state": "half-open"}
+                raise ToolError(
+                    f"tool '{name}' is paused by the circuit breaker "
+                    f"(consecutive failures: {e['failures']}, "
+                    f"retry after cooldown)",
+                    code="CIRCUIT_OPEN")
+            return {"state": e["state"]}
+
+    def after_call(self, tenant_id: str, name: str, ok: bool) -> None:
+        now = _clock()
+        with self._lock:
+            e = self._entry(tenant_id, name)
+            if ok:
+                e["state"] = "closed"
+                e["failures"] = 0
+                e["opened_at"] = None
+                return
+            if e["state"] == "half-open":
+                e["state"] = "open"
+                e["opened_at"] = now
+                return
+            e["failures"] += 1
+            if e["failures"] >= config.tool_breaker_threshold():
+                e["state"] = "open"
+                e["opened_at"] = now
+
+    def state(self, tenant_id: str, name: str) -> dict:
+        with self._lock:
+            e = dict(self._entry(tenant_id, name))
+        e["threshold"] = config.tool_breaker_threshold()
+        e["cooldown_sec"] = config.tool_breaker_cooldown_sec()
+        return e
+
+    def reset(self, tenant_id: str | None = None,
+              name: str | None = None) -> None:
+        """Clear breaker state: one tool, or everything if omitted."""
+        with self._lock:
+            if tenant_id is None and name is None:
+                self._states.clear()
+            else:
+                self._states.pop((tenant_id, name), None)
+
+
+BREAKER = CircuitBreaker()
+
+
 # --------------------------------------------------------------- execution --
 
 def list_tools() -> list[dict]:
@@ -132,13 +217,23 @@ def execute_tool(tenant_id: str, name: str, args: dict,
         raise ToolError(f"invalid arguments for tool '{name}': {errors}",
                         code="INVALID_ARGS")
     warnings = scan_value(args)
+    try:
+        BREAKER.before_call(tenant_id, name)
+    except ToolError:
+        db.audit(tenant_id, "engine", "tool.rejected", f"tool:{name}",
+                 {"run_id": run_id, "reason": "circuit_open",
+                  "breaker_state": BREAKER.state(tenant_id, name)})
+        raise
     started = time.time()
     try:
         result = tool["fn"](args)
     except ToolError:
+        BREAKER.after_call(tenant_id, name, ok=False)
         raise
     except Exception as e:  # noqa: BLE001 - surfaced as tool error
+        BREAKER.after_call(tenant_id, name, ok=False)
         raise ToolError(f"tool '{name}' failed: {e}", code="TOOL_FAILED")
+    BREAKER.after_call(tenant_id, name, ok=True)
     latency_ms = int((time.time() - started) * 1000)
     db.audit(tenant_id, "engine", "tool.called", f"tool:{name}",
              {"run_id": run_id, "args": args, "latency_ms": latency_ms,

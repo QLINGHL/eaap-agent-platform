@@ -174,7 +174,7 @@ PRD-grade hardening pending · **Roadmap** = designed, not built here.
 | FR-404 argument validation | Implemented | Schema-checked before execution |
 | FR-405 tool auth | Partial | Tenant scoping enforced; per-tool OAuth Roadmap |
 | FR-406 tool audit | Implemented | Full calls audited with redacted args |
-| FR-407 circuit breaker | Roadmap | Model-layer fallback exists; per-tool breaker not built |
+| FR-407 circuit breaker | Implemented | Per-tool breaker: N consecutive failures pause the tool (CIRCUIT_OPEN), half-open trial after cooldown, reset via POST /v1/tools/{name}/reset; env EAAP_TOOL_BREAKER_THRESHOLD / EAAP_TOOL_BREAKER_COOLDOWN_SEC |
 | FR-501–505 code sandbox | Partial | Subprocess with stripped env, timeout, temp cwd — **not** microVM isolation; do not run hostile code |
 | FR-601 doc parsing | Partial | Text/Markdown ingestion; PDF/OCR Roadmap |
 | FR-602 chunking | Implemented | Paragraph-aware with overlap |
