@@ -260,6 +260,18 @@ def list_approvals(tenant: str = Depends(current_tenant),
     return [dict(r) for r in rows]
 
 
+@app.post("/v1/approvals/expire")
+def expire_approvals(tenant: str = Depends(current_tenant)):
+    """FR-803 sweep: auto-reject approvals past their node's timeout and
+    resume the parked runs down their rejected branch."""
+    expired = engine.expire_approvals(tenant_id=tenant)
+    for approval in expired:
+        run = engine.get_run(tenant, approval["run_id"])
+        if run and run["status"] == "waiting_approval":
+            engine.start_run_async(approval["run_id"])
+    return {"expired": [a["id"] for a in expired]}
+
+
 @app.post("/v1/approvals/{approval_id}/decision")
 def decide(approval_id: str, body: DecisionBody,
            tenant: str = Depends(current_tenant)):

@@ -5,7 +5,9 @@ graph DSL.
   can resume after a crash from its last completed node.
 - Node executions are recorded with idempotency key run_id:node_id:attempt.
 - human_review nodes pause the run (status=waiting_approval) until a
-  decision is recorded, then resume from the checkpoint.
+  decision is recorded, then resume from the checkpoint. A node config
+  timeout_seconds auto-rejects the approval once it expires (FR-803);
+  the parked run then proceeds down its rejected branch on resume.
 - loop nodes implement controlled iteration; parallel nodes run branch
   chains concurrently and join.
 """
@@ -511,6 +513,13 @@ def _handle_human_review(ex: _Exec, node: dict, ctx: dict, state: dict) -> None:
     decided = pending and pending["status"] != "pending"
     if not decided:
         if pending is None:
+            timeout = (node.get("config") or {}).get("timeout_seconds")
+            if timeout is not None and (
+                    isinstance(timeout, bool)
+                    or not isinstance(timeout, (int, float)) or timeout <= 0):
+                raise NodeFailed(
+                    "human_review node config 'timeout_seconds' must be a"
+                    " positive number of seconds")
             approval_id = db.new_id("appr")
             message = str(render((node.get("config") or {}).get("message", ""),
                                  ctx))
@@ -563,6 +572,10 @@ def resume_run(tenant_id: str, run_id: str, sync: bool = False) -> dict:
         raise ValueError("run not found")
     if run["status"] in ("completed", "failed", "cancelled"):
         raise ValueError(f"run is already {run['status']}")
+    # Lazy FR-803 sweep: an expired approval is auto-rejected before the
+    # pending check below, so resuming a timed-out run proceeds down the
+    # rejected branch instead of blocking forever.
+    expire_approvals(tenant_id=tenant_id)
     if run["status"] == "waiting_approval":
         pending = db.q1("SELECT * FROM approvals WHERE run_id=? AND"
                         " status='pending'", (run_id,))
@@ -574,12 +587,77 @@ def resume_run(tenant_id: str, run_id: str, sync: bool = False) -> dict:
     return get_run(tenant_id, run_id)
 
 
+def approval_timeout_seconds(approval: dict) -> float | None:
+    """Timeout (seconds) for a pending approval, read from its
+    human_review node's config in the run's stored graph spec.
+
+    Returns None when the node sets no (valid) timeout: such approvals
+    never expire. Invalid configs fail loudly at approval creation, so
+    a stored positive number is the only value trusted here."""
+    run = db.q1("SELECT graph_spec FROM runs WHERE id=?",
+                (approval["run_id"],))
+    if run is None:
+        return None
+    spec = db.jload(run["graph_spec"], {}) or {}
+    for node in spec.get("nodes", []):
+        if node.get("id") == approval["node_id"] \
+                and node.get("type") == "human_review":
+            timeout = (node.get("config") or {}).get("timeout_seconds")
+            if isinstance(timeout, bool) \
+                    or not isinstance(timeout, (int, float)) or timeout <= 0:
+                return None
+            return float(timeout)
+    return None
+
+
+def _expire_approval(row: dict, now: float) -> dict:
+    """Mark one pending approval auto-rejected by timeout (FR-803)."""
+    db.x("UPDATE approvals SET status='rejected', decision='rejected',"
+         " comment='expired: approval timed out', decided_at=?"
+         " WHERE id=?", (now, row["id"]))
+    emit(row["run_id"], "approval.expired",
+         {"approval_id": row["id"], "node_id": row["node_id"]})
+    db.audit(row["tenant_id"], "engine", "approval.expired",
+             f"approval:{row['id']}", {"run_id": row["run_id"]})
+    return dict(db.q1("SELECT * FROM approvals WHERE id=?", (row["id"],)))
+
+
+def expire_approvals(now: float | None = None,
+                     tenant_id: str | None = None) -> list[dict]:
+    """Auto-reject every pending approval past its node's timeout.
+
+    Expired runs stay parked in waiting_approval until resumed (via
+    resume_run or POST /v1/approvals/expire), at which point the run
+    proceeds down the rejected branch. Returns the expired approvals."""
+    now = db.now_ts() if now is None else now
+    sql = "SELECT * FROM approvals WHERE status='pending'"
+    params: tuple = ()
+    if tenant_id is not None:
+        sql += " AND tenant_id=?"
+        params = (tenant_id,)
+    expired = []
+    for row in db.q(sql, params):
+        approval = dict(row)
+        timeout = approval_timeout_seconds(approval)
+        if timeout is None:
+            continue
+        if approval["created_at"] + timeout <= now:
+            expired.append(_expire_approval(approval, now))
+    return expired
+
+
 def decide_approval(tenant_id: str, approval_id: str, decision: str,
                     comment: str = "", modifications: dict | None = None) -> dict:
     row = db.q1("SELECT * FROM approvals WHERE id=? AND tenant_id=?",
                 (approval_id, tenant_id))
     if row is None:
         raise ValueError("approval not found")
+    if row["status"] == "pending":
+        timeout = approval_timeout_seconds(dict(row))
+        if timeout is not None \
+                and row["created_at"] + timeout <= db.now_ts():
+            _expire_approval(dict(row), db.now_ts())
+            raise ValueError("approval expired; auto-rejected")
     if row["status"] != "pending":
         raise ValueError(f"approval already decided ({row['status']})")
     if decision not in ("approved", "rejected", "modified"):

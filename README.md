@@ -86,7 +86,10 @@ re-executing it (covered by a dedicated crash-simulation test).
 
 **HITL.** A `human_review` node creates an approval record and parks the
 run in `waiting_approval`. Approve / reject / modify via the approvals API
-resumes from the checkpoint and routes the branch by decision.
+resumes from the checkpoint and routes the branch by decision. A node
+config `timeout_seconds` auto-rejects the approval once it expires
+(`POST /v1/approvals/expire` sweep, or lazily on resume); a late human
+decision on an expired approval is refused.
 
 **Knowledge.** Documents are chunked with overlap and embedded with a
 deterministic hashed bag-of-words embedder (offline; swappable). Retrieval
@@ -128,7 +131,7 @@ output in the audit log and on node outputs.
 | POST | `/v1/runs/{run_id}/resume` | Resume from last checkpoint |
 | GET | `/v1/runs/{run_id}/trace` | Node executions, events, checkpoints |
 | GET | `/v1/runs/{run_id}/events` | SSE event stream |
-| GET/POST | `/v1/approvals`, `/v1/approvals/{id}/decision` | HITL queue and decisions |
+| GET/POST | `/v1/approvals`, `/v1/approvals/{id}/decision`, `/v1/approvals/expire` | HITL queue, decisions, timeout sweep |
 | POST | `/v1/knowledge-bases`, `/{id}/documents`, `/{id}/search` | KB management + hybrid search |
 | GET/POST | `/v1/tools` | Tool registry / direct tool invocation |
 | POST | `/v1/evals/datasets`, `/v1/evals/runs` | Eval datasets and batch runs |
@@ -187,7 +190,7 @@ PRD-grade hardening pending · **Roadmap** = designed, not built here.
 | FR-704 loop termination | Implemented | `max_iterations` + global step cap |
 | FR-801 approvals | Implemented | Approve/reject/modify drives branching |
 | FR-802 notifications | Partial | Via API + SSE events; email/IM/webhook Roadmap |
-| FR-803 approval timeouts | Roadmap | |
+| FR-803 approval timeouts | Implemented | `timeout_seconds` on human_review nodes; expired approvals auto-reject, late decisions refused, parked runs resume down the rejected branch |
 | FR-804 feedback → dataset | Roadmap | |
 | FR-901 trace | Implemented | run → node → llm/tool, tokens, latency, cost |
 | FR-902 datasets | Implemented | Stored, versioned field, JSONL import |
