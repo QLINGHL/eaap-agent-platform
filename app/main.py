@@ -123,6 +123,12 @@ def health():
     return {"status": "ok", "service": "eaap"}
 
 
+@app.get("/v1/gateway/cache/stats")
+def gateway_cache_stats(tenant: str = Depends(current_tenant)):
+    """FR-305 semantic-cache hit/miss statistics (counts only, no prompts)."""
+    return engine.gateway().cache_stats()
+
+
 @app.post("/v1/agents")
 def create_agent(body: CreateAgentBody, tenant: str = Depends(current_tenant)):
     return agents_mod.create_agent(tenant, body.name, body.description)

@@ -29,6 +29,16 @@ def rate_limit_refill_per_sec() -> float:
     return float(os.environ.get("EAAP_RATE_LIMIT_REFILL_PER_SEC", "0.5"))
 
 
+def cache_max_size() -> int:
+    """Max entries in the gateway semantic cache (FR-305)."""
+    return int(os.environ.get("EAAP_CACHE_MAX_SIZE", "128"))
+
+
+def cache_ttl_sec() -> float:
+    """Cache entry lifetime in seconds, 0 = no expiry (FR-305)."""
+    return float(os.environ.get("EAAP_CACHE_TTL_SEC", "0"))
+
+
 def max_run_steps() -> int:
     return int(os.environ.get("EAAP_MAX_RUN_STEPS", "500"))
 

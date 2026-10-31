@@ -167,7 +167,7 @@ PRD-grade hardening pending · **Roadmap** = designed, not built here.
 | FR-302 capability tags | Roadmap | |
 | FR-303 routing & fallback | Implemented | Primary → fallback chain, tested |
 | FR-304 rate limiting | Implemented | Per-tenant token bucket (429-style `RATE_LIMITED`) |
-| FR-305 semantic cache | Roadmap | |
+| FR-305 semantic cache | Implemented | In-memory LRU (normalized-prompt key, tenant-scoped, TTL optional) + hit/miss stats via GET /v1/gateway/cache/stats; env EAAP_CACHE_MAX_SIZE / EAAP_CACHE_TTL_SEC |
 | FR-306 structured output | Partial | JSON extraction helper + schema evaluator; no auto-repair loop |
 | FR-307 credential handling | Partial | API keys stored hashed; provider keys via env, never logged |
 | FR-308 model canary | Roadmap | |
