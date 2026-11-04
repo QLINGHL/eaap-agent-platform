@@ -160,6 +160,17 @@ CREATE TABLE IF NOT EXISTS quota_usage (
     tenant_id TEXT NOT NULL, period TEXT NOT NULL, metric TEXT NOT NULL,
     used REAL DEFAULT 0, PRIMARY KEY (tenant_id, period, metric)
 );
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+    id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, url TEXT NOT NULL,
+    events TEXT DEFAULT '[]', active INTEGER DEFAULT 1,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, tenant_id TEXT NOT NULL,
+    run_id TEXT NOT NULL, event TEXT NOT NULL, attempts INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending', last_status_code INTEGER,
+    last_error TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_runs_tenant ON runs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(kb_id);
 CREATE INDEX IF NOT EXISTS idx_ck_run ON checkpoints(run_id, seq);

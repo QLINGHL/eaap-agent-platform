@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import agents as agents_mod
-from . import db, engine, evals, knowledge
+from . import db, engine, evals, knowledge, webhooks
 from .graph import GraphValidationError
 from .tools import list_tools
 
@@ -88,6 +88,11 @@ class SearchBody(BaseModel):
 class ToolBody(BaseModel):
     name: str
     args: dict = {}
+
+
+class WebhookBody(BaseModel):
+    url: str
+    events: list[str] | None = None
 
 
 class DecisionBody(BaseModel):
@@ -345,6 +350,36 @@ def register_tool_info(body: ToolBody, tenant: str = Depends(current_tenant)):
     except ToolError as e:
         raise HTTPException(400, detail={"code": e.code, "message": str(e)})
     return {"tool": body.name, "result": result}
+
+
+# --------------------------------------------------------------- webhooks --
+
+@app.post("/v1/webhooks")
+def create_webhook(body: WebhookBody, tenant: str = Depends(current_tenant)):
+    """FR-1304: register a tenant webhook endpoint for run terminal events."""
+    try:
+        return webhooks.create_endpoint(tenant, body.url, body.events)
+    except ValueError as e:
+        err(str(e), 400, "WEBHOOK_INVALID")
+
+
+@app.get("/v1/webhooks")
+def list_webhooks(tenant: str = Depends(current_tenant)):
+    return webhooks.list_endpoints(tenant)
+
+
+@app.delete("/v1/webhooks/{webhook_id}")
+def delete_webhook(webhook_id: str, tenant: str = Depends(current_tenant)):
+    if not webhooks.delete_endpoint(tenant, webhook_id):
+        err("webhook not found", 404, "NOT_FOUND")
+    return {"deleted": webhook_id}
+
+
+@app.get("/v1/webhooks/{webhook_id}/deliveries")
+def webhook_deliveries(webhook_id: str, tenant: str = Depends(current_tenant)):
+    if webhooks.get_endpoint(tenant, webhook_id) is None:
+        err("webhook not found", 404, "NOT_FOUND")
+    return webhooks.list_deliveries(tenant, webhook_id)
 
 
 # ------------------------------------------------------------------ evals --

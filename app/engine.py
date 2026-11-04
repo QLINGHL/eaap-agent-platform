@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from . import config, db, knowledge, tools as tools_mod
+from . import webhooks
 from .expr import ExprError, evaluate, render
 from .guard import scan
 from .providers import Gateway, ProviderError
@@ -131,6 +132,7 @@ def cancel_run(tenant_id: str, run_id: str) -> dict:
         db.x("UPDATE runs SET status='cancelled', ended_at=? WHERE id=?",
              (db.now_ts(), run_id))
         emit(run_id, "run.cancelled", {})
+        webhooks.deliver_run_event(tenant_id, run_id, "run.cancelled", {})
     db.audit(tenant_id, "api", "run.cancelled", f"run:{run_id}", {})
     return get_run(tenant_id, run_id)
 
@@ -459,6 +461,7 @@ def execute_run(run_id: str, crash_after: int | None = None) -> dict:
                 db.x("UPDATE runs SET status='cancelled', ended_at=? WHERE id=?",
                      (db.now_ts(), run_id))
                 emit(run_id, "run.cancelled", {})
+                webhooks.deliver_run_event(tenant, run_id, "run.cancelled", {})
                 return get_run(tenant, run_id)
             node = ex.nodes[state["pc"]]
             if node["type"] == "end":
@@ -468,6 +471,8 @@ def execute_run(run_id: str, crash_after: int | None = None) -> dict:
                 db.x("UPDATE runs SET status='completed', output=?, ended_at=?"
                      " WHERE id=?", (db.jdump(output), db.now_ts(), run_id))
                 emit(run_id, "run.completed", {"output": output})
+                webhooks.deliver_run_event(tenant, run_id, "run.completed",
+                                           {"output": output})
                 db.audit(tenant, "engine", "run.completed", f"run:{run_id}", {})
                 return get_run(tenant, run_id)
             if node["type"] == "human_review":
@@ -500,6 +505,8 @@ def execute_run(run_id: str, crash_after: int | None = None) -> dict:
         db.x("UPDATE runs SET status='failed', error=?, ended_at=? WHERE id=?",
              (str(e), db.now_ts(), run_id))
         emit(run_id, "run.failed", {"error": str(e)})
+        webhooks.deliver_run_event(tenant, run_id, "run.failed",
+                                   {"error": str(e)})
         db.audit(tenant, "engine", "run.failed", f"run:{run_id}",
                  {"error": str(e)})
         return get_run(tenant, run_id)
