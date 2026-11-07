@@ -84,46 +84,58 @@ def _eval(node, ctx: dict):
         return result
     if isinstance(node, ast.UnaryOp):
         val = _eval(node.operand, ctx)
-        if isinstance(node.op, ast.Not):
-            return not val
-        if isinstance(node.op, ast.USub):
-            return -val
-        return +val
+        try:
+            if isinstance(node.op, ast.Not):
+                return not val
+            if isinstance(node.op, ast.USub):
+                return -val
+            return +val
+        except TypeError as e:
+            raise ExprError(f"bad operand type for unary operator: {e}")
     if isinstance(node, ast.BinOp):
         left, right = _eval(node.left, ctx), _eval(node.right, ctx)
-        if isinstance(node.op, ast.Add):
-            return left + right
-        if isinstance(node.op, ast.Sub):
-            return left - right
-        if isinstance(node.op, ast.Mult):
-            return left * right
-        if isinstance(node.op, ast.Div):
-            return left / right
-        if isinstance(node.op, ast.Mod):
-            return left % right
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+            if isinstance(node.op, ast.Mod):
+                return left % right
+        except ZeroDivisionError:
+            raise ExprError("division by zero")
+        except TypeError as e:
+            raise ExprError(f"bad operand types for '{type(node.op).__name__}': {e}")
         raise ExprError("unsupported operator")
     if isinstance(node, ast.Compare):
         left = _eval(node.left, ctx)
         for op, comp in zip(node.ops, node.comparators):
             right = _eval(comp, ctx)
-            if isinstance(op, ast.Eq):
-                ok = left == right
-            elif isinstance(op, ast.NotEq):
-                ok = left != right
-            elif isinstance(op, ast.Lt):
-                ok = left < right
-            elif isinstance(op, ast.LtE):
-                ok = left <= right
-            elif isinstance(op, ast.Gt):
-                ok = left > right
-            elif isinstance(op, ast.GtE):
-                ok = left >= right
-            elif isinstance(op, ast.In):
-                ok = left in right
-            elif isinstance(op, ast.NotIn):
-                ok = left not in right
-            else:
-                raise ExprError("unsupported comparison")
+            try:
+                if isinstance(op, ast.Eq):
+                    ok = left == right
+                elif isinstance(op, ast.NotEq):
+                    ok = left != right
+                elif isinstance(op, ast.Lt):
+                    ok = left < right
+                elif isinstance(op, ast.LtE):
+                    ok = left <= right
+                elif isinstance(op, ast.Gt):
+                    ok = left > right
+                elif isinstance(op, ast.GtE):
+                    ok = left >= right
+                elif isinstance(op, ast.In):
+                    ok = left in right
+                elif isinstance(op, ast.NotIn):
+                    ok = left not in right
+                else:
+                    raise ExprError("unsupported comparison")
+            except TypeError as e:
+                raise ExprError(f"cannot compare {type(left).__name__} "
+                                f"with {type(right).__name__}: {e}")
             if not ok:
                 return False
             left = right
@@ -132,6 +144,19 @@ def _eval(node, ctx: dict):
         return [_eval(e, ctx) for e in node.elts]
     if isinstance(node, ast.Tuple):
         return tuple(_eval(e, ctx) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        out = {}
+        for k_node, v_node in zip(node.keys, node.values):
+            if k_node is None:  # {**other} unpacking is not supported
+                raise ExprError("dict unpacking is not supported in expressions")
+            try:
+                key = _eval(k_node, ctx)
+            except ExprError:
+                raise
+            if not isinstance(key, (str, int, float, bool, type(None))):
+                raise ExprError(f"unsupported dict key type: {type(key).__name__}")
+            out[key] = _eval(v_node, ctx)
+        return out
     raise ExprError(f"unsupported syntax: {type(node).__name__}")
 
 
